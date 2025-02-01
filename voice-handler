@@ -1,0 +1,81 @@
+const axios = require("axios");
+const twilio = require("twilio");
+
+const NEWS_API_KEY = "b442b56a8c934c50839a6e7f7243274e"; // Ensure this is valid
+
+async function fetchNewsByKeyword(keyword) {
+    const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(keyword)}&language=en&apiKey=${NEWS_API_KEY}`;
+    try {
+        const response = await axios.get(url);
+        const articles = response.data.articles;
+
+        if (!articles || articles.length === 0) {
+            return null;
+        }
+
+        return articles.slice(0, 3).map((article, index) => `${index + 1}. ${article.title}`).join(" ");
+    } catch (error) {
+        console.error(`Error fetching news for keyword "${keyword}":`, error.message);
+        return null;
+    }
+}
+
+// **Twilio Voice Function Handler**
+exports.handler = async function (context, event, callback) {
+    const response = new twilio.twiml.VoiceResponse();
+
+    if (!event.SpeechResult) {
+        // asks user for topic
+        const gather = response.gather({
+            input: "speech",
+            timeout: 5, // gives time for user to respond
+            speechTimeout: "auto",
+            action: "/voice-news", // calls function after speech is captured
+        });
+        gather.say("Welcome to BuzzLine! Please say a topic you'd like to hear news about.");
+        response.redirect("/voice-news");
+
+        return callback(null, response.toString());
+    }
+
+    // **Step 2: Capture Speech Result**
+    const userInput = event.SpeechResult.trim();
+    console.log("Captured SpeechResult:", userInput);
+
+    if (!userInput) {
+        response.say("I couldn't hear anything. Please try again.");
+        response.redirect("/voice-news");
+        return callback(null, response.toString());
+    }
+
+    // **Step 3: Extract a Keyword (Use the First Word)**
+    const words = userInput.split(" ");
+    const keyword = words[0]; // Take the first word as keyword
+    console.log("Extracted Keyword:", keyword);
+
+    if (!keyword) {
+        response.say("I couldn't extract a keyword. Please try again.");
+        response.redirect("/voice-news");
+        return callback(null, response.toString());
+    }
+
+    // **Step 4: Fetch News for the Keyword**
+    const newsHeadlines = await fetchNewsByKeyword(keyword);
+    if (!newsHeadlines) {
+        response.say(`No news found for ${keyword}. Please try another topic.`);
+        response.redirect("/voice-news");
+        return callback(null, response.toString());
+    }
+
+    // **Step 5: Respond with News**
+    response.say(`Here are the latest news headlines for ${keyword}:`);
+newsHeadlines.split(". ").forEach((headline) => {
+    response.say(headline);
+    response.pause({ length: 1.5 });
+});
+
+    response.pause({ length: 1 });
+    response.say("Thank you for using BuzzLine. Goodbye!");
+
+    return callback(null, response.toString());
+};
